@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Math Boss Rank V4</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        body { 
+            font-family: 'Inter', 'Sarabun', sans-serif; 
+            background-color: #0f172a; 
+            color: white; 
+            margin: 0;
+            overflow-x: hidden;
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        /* Animated Background for Projector */
+        .bg-animated {
+            background: linear-gradient(-45deg, #0f172a, #1e3a8a, #312e81, #0f172a);
+            background-size: 400% 400%;
+            animation: gradientBG 15s ease infinite;
+            height: 100vh;
+            width: 100vw;
+            position: relative;
+            overflow: hidden;
+        }
+        @keyframes gradientBG {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        /* Floating Particles */
+        .particle {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.4);
+            animation: floatUp infinite linear;
+        }
+        @keyframes floatUp {
+            0% { transform: translateY(100vh) scale(0.5); opacity: 1; }
+            100% { transform: translateY(-10vh) scale(1.5); opacity: 0; }
+        }
+
+        /* Spinning Ring */
+        .spin-ring {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* One Line Text for Equation */
+        .equation-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 90vw;
+            font-size: clamp(3rem, 8vw, 6rem);
+            font-weight: 900;
+            text-shadow: 0 0 20px rgba(59, 130, 246, 0.8);
+        }
+        
+        /* Answer Reveal Animations */
+        .reveal-anim {
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        .step-anim {
+            opacity: 0;
+            animation: slideRight 0.5s ease forwards;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes slideRight {
+            0% { transform: translateX(-20px); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const playTick = () => {
+            try { const synth = new Tone.Synth().toDestination(); synth.triggerAttackRelease("C6", "32n"); } catch (e) {}
+        };
+        const playEnd = () => {
+            try { const synth = new Tone.Synth().toDestination(); synth.triggerAttackRelease("C4", "2n"); } catch (e) {}
+        };
+        const playSuccess = () => {
+            try { 
+                const synth = new Tone.PolySynth(Tone.Synth).toDestination(); 
+                synth.triggerAttackRelease(["C4", "E4", "G4", "C5"], "2n"); 
+            } catch (e) {}
+        };
+
+        const getRankInfo = (score) => {
+            if (score >= 800) return { name: 'Grandmaster', color: 'bg-red-600 shadow-red-500/50 text-white' };
+            if (score >= 550) return { name: 'Master', color: 'bg-pink-500 shadow-pink-500/50 text-white' };
+            if (score >= 350) return { name: 'Heroic', color: 'bg-purple-600 shadow-purple-500/50 text-white' };
+            if (score >= 200) return { name: 'Diamond', color: 'bg-cyan-400 shadow-cyan-400/50 text-gray-900' };
+            if (score >= 100) return { name: 'Platinum', color: 'bg-teal-300 shadow-teal-300/50 text-gray-900' };
+            if (score >= 50) return { name: 'Gold', color: 'bg-yellow-400 shadow-yellow-400/50 text-gray-900' };
+            if (score >= 20) return { name: 'Silver', color: 'bg-gray-300 shadow-gray-300/50 text-gray-900' };
+            return { name: 'Bronze', color: 'bg-amber-700 shadow-amber-700/50 text-white' };
+        };
+
+        // Equation Generator
+        const generateEquation = (gradeStr, diffLevelStr) => {
+            const diffMap = { "ง่าย": 1, "ปานกลาง": 2, "ยาก": 3, "ยากมาก": 4 };
+            const difficulty = diffMap[diffLevelStr] || 1;
+            const gradeLevel = parseInt(gradeStr.replace('ป.', '')) || 1;
+            
+            let eq = "";
+            let answer = 0;
+            const operators = ["+", "-"];
+            if (gradeLevel >= 3) { operators.push("*", "/"); }
+
+            const getValidPair = (op, diff) => {
+                let n1, n2, ans;
+                const max = diff * (gradeLevel >= 4 ? 20 : 10);
+                switch (op) {
+                    case "+":
+                        n1 = Math.floor(Math.random() * max) + 1;
+                        n2 = Math.floor(Math.random() * max) + 1;
+                        ans = n1 + n2; break;
+                    case "-":
+                        n1 = Math.floor(Math.random() * max) + 5;
+                        n2 = Math.floor(Math.random() * n1) + 1;
+                        ans = n1 - n2; break;
+                    case "*":
+                        n1 = Math.floor(Math.random() * (diff * 5)) + 1;
+                        n2 = Math.floor(Math.random() * 12) + 1;
+                        ans = n1 * n2; break;
+                    case "/":
+                        n2 = Math.floor(Math.random() * 12) + 1;
+                        ans = Math.floor(Math.random() * (diff * 5)) + 1;
+                        n1 = n2 * ans; break; // Ensure integer division
+                }
+                return { n1, n2, ans };
+            };
+
+            // Chance for 2-step parenthesis if Grade 5-6
+            const useBrackets = (gradeLevel >= 5 && Math.random() < (difficulty * 0.25));
+            
+            // เปลี่ยนเครื่องหมายให้สวยงามและชัดเจน
+            const displayOp = (op) => {
+                if (op === '*') return '×';
+                if (op === '/') return '÷';
+                return op;
+            };
+            
+            let steps = [];
+
+            if (useBrackets) {
+                const innerOp = operators[Math.floor(Math.random() * operators.length)];
+                const inner = getValidPair(innerOp, difficulty);
+                const outerOp = ["+", "-"][Math.floor(Math.random() * 2)]; // Keep outer simple to avoid complex decimals
+                const isBracketFirst = Math.random() > 0.5;
+                
+                let outNum;
+                if (isBracketFirst) {
+                    outNum = Math.floor(Math.random() * 20) + 1;
+                    if (outerOp === "+") answer = inner.ans + outNum;
+                    if (outerOp === "-") {
+                        outNum = Math.floor(Math.random() * inner.ans) + 1;
+                        if(outNum > inner.ans) outNum = 0;
+                        answer = inner.ans - outNum;
+                    }
+                    eq = `(${inner.n1} ${displayOp(innerOp)} ${inner.n2}) ${displayOp(outerOp)} ${outNum}`;
+                    steps.push(`ขั้นที่ 1: ทำในวงเล็บก่อน (${inner.n1} ${displayOp(innerOp)} ${inner.n2}) = ${inner.ans}`);
+                    steps.push(`ขั้นที่ 2: นำผลลัพธ์มาคำนวณต่อ ${inner.ans} ${displayOp(outerOp)} ${outNum} = ${answer}`);
+                } else {
+                    outNum = Math.floor(Math.random() * 20) + inner.ans;
+                    if (outerOp === "+") answer = outNum + inner.ans;
+                    if (outerOp === "-") answer = outNum - inner.ans;
+                    eq = `${outNum} ${displayOp(outerOp)} (${inner.n1} ${displayOp(innerOp)} ${inner.n2})`;
+                    steps.push(`ขั้นที่ 1: ทำในวงเล็บก่อน (${inner.n1} ${displayOp(innerOp)} ${inner.n2}) = ${inner.ans}`);
+                    steps.push(`ขั้นที่ 2: นำมาคำนวณต่อ ${outNum} ${displayOp(outerOp)} ${inner.ans} = ${answer}`);
+                }
+            } else {
+                const op = operators[Math.floor(Math.random() * operators.length)];
+                const res = getValidPair(op, difficulty);
+                eq = `${res.n1} ${displayOp(op)} ${res.n2}`;
+                answer = res.ans;
+                steps.push(`คำนวณ: ${res.n1} ${displayOp(op)} ${res.n2} = ${answer}`);
+            }
+
+            return { question: eq, answer: answer, steps: steps };
+        };
+
+        const ProjectorView = ({ syncState, students }) => {
+            const [unlocked, setUnlocked] = useState(false);
+            const [timeLeft, setTimeLeft] = useState(15);
+            
+            const handleUnlock = async () => {
+                await Tone.start();
+                setUnlocked(true);
+                document.documentElement.requestFullscreen().catch(e => console.log("Fullscreen blocked"));
+            };
+
+            useEffect(() => {
+                if (syncState.view === 'question' && syncState.questionData && !syncState.questionData.isPaused && !syncState.questionData.showAnswer) {
+                    const interval = setInterval(() => {
+                        setTimeLeft((prev) => {
+                            if (prev <= 1) {
+                                clearInterval(interval);
+                                if (unlocked) playEnd();
+                                return 0;
+                            }
+                            if (unlocked) playTick();
+                            return prev - 1;
+                        });
+                    }, 1000);
+                    return () => clearInterval(interval);
+                }
+            }, [syncState, unlocked]);
+
+            useEffect(() => {
+                if (syncState.questionData) {
+                    setTimeLeft(syncState.questionData.timeLeft);
+                    if (syncState.questionData.showAnswer && unlocked) {
+                        playSuccess();
+                    }
+                }
+            }, [syncState.questionData?.timestamp, syncState.questionData?.showAnswer]);
+
+            // Particles generation
+            const renderParticles = () => {
+                const p = [];
+                for(let i=0; i<20; i++) {
+                    const size = Math.random() * 10 + 5;
+                    const left = Math.random() * 100;
+                    const delay = Math.random() * 10;
+                    const dur = Math.random() * 10 + 10;
+                    p.push(<div key={i} className="particle" style={{ width: size, height: size, left: `${left}%`, animationDelay: `-${delay}s`, animationDuration: `${dur}s` }}></div>);
+                }
+                return p;
+            };
+
+            if (!unlocked) {
+                return (
+                    <div className="bg-slate-900 h-screen w-screen flex flex-col items-center justify-center cursor-pointer" onClick={handleUnlock}>
+                        <i className="fas fa-volume-up text-6xl mb-4 text-blue-500 animate-pulse"></i>
+                        <h1 className="text-3xl font-bold">คลิกที่หน้าจอนี้ 1 ครั้งเพื่อเปิดระบบภาพและเสียง</h1>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="bg-animated flex flex-col items-center justify-center text-center">
+                    {renderParticles()}
+                    
+                    {syncState.view === 'waiting' && (
+                        <div className="z-10 flex flex-col items-center">
+                            <div className="w-24 h-24 spin-ring mb-8"></div>
+                            <h1 className="text-5xl font-bold tracking-widest text-blue-300 drop-shadow-lg">กำลังรอโจทย์...</h1>
+                        </div>
+                    )}
+
+                    {syncState.view === 'question' && syncState.questionData && (
+                        <div className="z-10 flex flex-col items-center w-full px-4">
+                            {!syncState.questionData.showAnswer && (
+                                <div className={`text-[150px] font-black drop-shadow-2xl mb-8 ${timeLeft === 0 ? 'text-red-500' : 'text-yellow-400'}`}>
+                                    {timeLeft}
+                                </div>
+                            )}
+                            
+                            <div className={`bg-slate-900/80 backdrop-blur-md p-10 rounded-[40px] border-2 ${syncState.questionData.showAnswer ? 'border-green-500/50 shadow-[0_0_50px_rgba(34,197,94,0.3)]' : 'border-slate-700/50 shadow-2xl'} w-11/12 max-w-6xl mx-auto flex flex-col items-center transition-all duration-500`}>
+                                <div className="equation-text flex items-center justify-center flex-wrap gap-4">
+                                    <span>{syncState.questionData.question}</span>
+                                    {syncState.questionData.showAnswer ? (
+                                        <span className="text-green-400 reveal-anim">= {syncState.questionData.answer}</span>
+                                    ) : (
+                                        <span>= ?</span>
+                                    )}
+                                </div>
+
+                                {syncState.questionData.showAnswer && syncState.questionData.steps && (
+                                    <div className="mt-10 w-full max-w-4xl bg-slate-800/80 rounded-2xl p-8 border border-slate-600 shadow-inner text-left reveal-anim">
+                                        <h3 className="text-2xl font-bold text-yellow-400 mb-6 border-b border-slate-600 pb-2"><i className="fas fa-lightbulb mr-3"></i>วิธีทำ (Step-by-step)</h3>
+                                        <div className="flex flex-col gap-4 text-3xl font-bold text-gray-200">
+                                            {syncState.questionData.steps.map((step, idx) => (
+                                                <div key={idx} className="step-anim flex items-start" style={{ animationDelay: `${idx * 0.3 + 0.2}s` }}>
+                                                    <span className="text-blue-400 mr-4"><i className="fas fa-check-circle"></i></span>
+                                                    <span>{step}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {syncState.questionData.isPaused && !syncState.questionData.showAnswer && (
+                                <div className="mt-8 text-2xl bg-red-500/80 px-6 py-2 rounded-full font-bold animate-pulse shadow-[0_0_20px_rgba(239,68,68,0.6)]">
+                                    หยุดเวลา
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {syncState.view === 'rank' && (
+                        <div className="z-10 w-full max-w-5xl px-4 pt-10">
+                            <h1 className="text-6xl font-bold text-yellow-400 drop-shadow-lg mb-10"><i className="fas fa-trophy mr-4"></i>หอเกียรติยศ (Leaderboard)</h1>
+                            <div className="bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-700 p-6 shadow-2xl max-h-[75vh] overflow-y-auto no-scrollbar">
+                                {students.sort((a,b) => b.score - a.score).slice(0, 10).map((st, i) => {
+                                    const rank = getRankInfo(st.score);
+                                    return (
+                                        <div key={st.id} className="flex justify-between items-center bg-slate-800 p-4 mb-3 rounded-xl border border-slate-700">
+                                            <div className="flex items-center gap-6">
+                                                <div className={`w-12 h-12 flex items-center justify-center rounded-full text-2xl font-black ${i===0?'bg-yellow-400 text-black':i===1?'bg-gray-300 text-black':i===2?'bg-amber-600 text-white':'bg-slate-700'}`}>
+                                                    {i+1}
+                                                </div>
+                                                <div className="text-left">
+                                                    <div className="text-2xl font-bold">{st.name} <span className="text-sm text-gray-400 ml-2">({st.grade})</span></div>
+                                                    <div className="text-sm text-gray-400">โจทย์ทั้งหมด {st.stats?.totalQuestions || 0} ข้อ</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-6">
+                                                <div className={`px-4 py-1 rounded-full font-bold shadow-lg ${rank.color}`}>
+                                                    {rank.name}
+                                                </div>
+                                                <div className="text-4xl font-black text-blue-400 w-24 text-right">
+                                                    {st.score}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const TeacherDashboard = ({ students, saveStudents, syncState, saveSync }) => {
+            const [activeTab, setActiveTab] = useState('control');
+            const [previewQ, setPreviewQ] = useState(null);
+            const [targetGrade, setTargetGrade] = useState('ป.1');
+            const [targetDiff, setTargetDiff] = useState('ง่าย');
+            const [gradeFilter, setGradeFilter] = useState('ทั้งหมด');
+            
+            // New Student Form
+            const [newStName, setNewStName] = useState('');
+            const [newStGrade, setNewStGrade] = useState('ป.1');
+
+            // Modals & Toasts
+            const [modal, setModal] = useState({ isOpen: false, title: '', msg: '', onConfirm: null });
+            const [toast, setToast] = useState({ isVisible: false, msg: '' });
+            const [deductState, setDeductState] = useState({ isOpen: false, studentId: null, studentName: '', pointsToDeduct: 1 });
+
+            const showToast = (msg) => {
+                setToast({ isVisible: true, msg });
+                setTimeout(() => setToast({ isVisible: false, msg: '' }), 3000);
+            };
+
+            const confirmAction = (title, msg, onConfirm) => {
+                setModal({ isOpen: true, title, msg, onConfirm });
+            };
+
+            // Keyboard Shortcuts
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    const tag = e.target.tagName;
+                    
+                    // ป้องกันไม่ให้คีย์ลัดทำงานตอนกำลังพิมพ์ช่อง Input (เพิ่มชื่อนักเรียน)
+                    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                    // ถ้ากำลังโฟกัสที่ Dropdown อนุญาตให้กด Shift/A ได้ แต่ห้ามกด Enter/Space (เพราะมันจะไปทับการเปิดปิดเมนู)
+                    if (tag === 'SELECT' && (e.key === 'Enter' || e.code === 'Space')) return;
+                    
+                    if (e.key === 'Shift') {
+                        e.preventDefault(); 
+                        if (activeTab !== 'control') setActiveTab('control');
+                        handlePreview();
+                    } else if (e.key === 'Enter') {
+                        if (!previewQ) return; // ถ้ายังไม่มีโจทย์ ไม่ต้องส่ง
+                        e.preventDefault(); 
+                        if (activeTab !== 'control') setActiveTab('control');
+                        handleSendToProjector();
+                    } else if (e.code === 'Space') {
+                        e.preventDefault(); 
+                        if (activeTab !== 'control') setActiveTab('control');
+                        handleTogglePause();
+                    } else if (e.code === 'KeyA') {
+                        e.preventDefault(); 
+                        if (activeTab !== 'control') setActiveTab('control');
+                        handleShowAnswer();
+                    }
+                };
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            });
+
+            // Actions
+            const handlePreview = () => {
+                const generated = generateEquation(targetGrade, targetDiff);
+                let recPoints = 1;
+                if (targetDiff === 'ปานกลาง' || targetDiff === 'ยาก') recPoints = 3;
+                if (targetDiff === 'ยากมาก') recPoints = 5;
+                setPreviewQ({ ...generated, recommendedPoints: recPoints });
+            };
+
+            const handleSendToProjector = () => {
+                if (!previewQ) return;
+                saveSync({
+                    view: 'question',
+                    questionData: {
+                        question: previewQ.question,
+                        answer: previewQ.answer,
+                        steps: previewQ.steps,
+                        timeLeft: 15,
+                        isPaused: false,
+                        showAnswer: false,
+                        timestamp: Date.now() // Force reset timer
+                    }
+                });
+                setPreviewQ(null);
+                showToast("ส่งโจทย์ขึ้นจอแล้ว!");
+            };
+
+            const handleTogglePause = () => {
+                if (syncState.view === 'question' && syncState.questionData) {
+                    saveSync({
+                        ...syncState,
+                        questionData: {
+                            ...syncState.questionData,
+                            isPaused: !syncState.questionData.isPaused
+                        }
+                    });
+                }
+            };
+
+            const handleShowAnswer = () => {
+                if (syncState.view === 'question' && syncState.questionData) {
+                    saveSync({
+                        ...syncState,
+                        questionData: {
+                            ...syncState.questionData,
+                            showAnswer: true,
+                            isPaused: true
+                        }
+                    });
+                    showToast("แสดงเฉลยแล้ว!");
+                }
+            };
+
+            const addPoints = (id, points) => {
+                const updated = students.map(st => {
+                    if (st.id === id) {
+                        const newStats = { ...st.stats };
+                        newStats.totalQuestions = (newStats.totalQuestions || 0) + 1;
+                        if(points === 1) newStats.plus1 = (newStats.plus1 || 0) + 1;
+                        if(points === 3) newStats.plus3 = (newStats.plus3 || 0) + 1;
+                        if(points === 5) newStats.plus5 = (newStats.plus5 || 0) + 1;
+                        return { ...st, score: st.score + points, stats: newStats };
+                    }
+                    return st;
+                });
+                saveStudents(updated);
+                showToast(`เพิ่ม +${points} สำเร็จ!`);
+            };
+
+            const handleAddStudent = (e) => {
+                e.preventDefault();
+                if (!newStName.trim()) return;
+                const newStudent = {
+                    id: Date.now().toString(),
+                    name: newStName,
+                    grade: newStGrade,
+                    score: 0,
+                    stats: { totalQuestions: 0, plus1: 0, plus3: 0, plus5: 0 }
+                };
+                saveStudents([...students, newStudent]);
+                setNewStName('');
+                showToast("เพิ่มนักเรียนสำเร็จ!");
+            };
+
+            const handleDeleteStudent = (id) => {
+                confirmAction("ลบรายชื่อนักเรียน", "คุณแน่ใจหรือไม่ที่จะลบรายชื่อนี้? ข้อมูลคะแนนจะหายไปทั้งหมด", () => {
+                    saveStudents(students.filter(st => st.id !== id));
+                    showToast("ลบนักเรียนแล้ว");
+                });
+            };
+
+            const handleResetRanks = () => {
+                confirmAction("รีเซ็ตคะแนนทั้งหมด", "คะแนนของนักเรียนทุกคนจะกลับไปเป็น 0 แน่ใจหรือไม่?", () => {
+                    const reset = students.map(st => ({...st, score: 0, stats: {totalQuestions:0, plus1:0, plus3:0, plus5:0}}));
+                    saveStudents(reset);
+                    showToast("รีเซ็ตคะแนนสำเร็จ!");
+                });
+            };
+
+            const openDeductModal = (student) => {
+                setDeductState({ isOpen: true, studentId: student.id, studentName: student.name, pointsToDeduct: 1 });
+            };
+
+            const handleDeductConfirm = () => {
+                const updated = students.map(st => {
+                    if (st.id === deductState.studentId) {
+                        let newScore = st.score - deductState.pointsToDeduct;
+                        if (newScore < 0) newScore = 0; // ป้องกันคะแนนติดลบ
+                        return { ...st, score: newScore };
+                    }
+                    return st;
+                });
+                saveStudents(updated);
+                showToast(`ลบคะแนน ${deductState.studentName} ไป ${deductState.pointsToDeduct} คะแนน`);
+                setDeductState({ isOpen: false, studentId: null, studentName: '', pointsToDeduct: 1 });
+            };
+
+            const openProjector = () => {
+                window.open(window.location.pathname + '?projector=true', 'ProjectorWindow', 'width=1280,height=720');
+            };
+
+            // Filtered students for Rank tab
+            const filteredStudents = gradeFilter === 'ทั้งหมด' ? students : students.filter(s => s.grade === gradeFilter);
+            
+            // Grades Array
+            const gradesList = ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6'];
+
+            return (
+                <div className="min-h-screen flex flex-col bg-slate-900">
+                    {/* Header */}
+                    <header className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shadow-md">
+                        <div className="flex gap-4">
+                            <button onClick={() => setActiveTab('control')} className={`px-6 py-2 rounded-lg font-bold transition-all ${activeTab === 'control' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-gray-300 hover:bg-slate-600'}`}>
+                                <i className="fas fa-gamepad mr-2"></i>ควบคุมเกม
+                            </button>
+                            <button onClick={() => { setActiveTab('rank'); saveSync({...syncState, view: 'rank'}); }} className={`px-6 py-2 rounded-lg font-bold transition-all ${activeTab === 'rank' ? 'bg-yellow-500 text-black' : 'bg-slate-700 text-gray-300 hover:bg-slate-600'}`}>
+                                <i className="fas fa-trophy mr-2"></i>แรงค์คะแนน
+                            </button>
+                            <button onClick={() => setActiveTab('students')} className={`px-6 py-2 rounded-lg font-bold transition-all ${activeTab === 'students' ? 'bg-green-600 text-white' : 'bg-slate-700 text-gray-300 hover:bg-slate-600'}`}>
+                                <i className="fas fa-users mr-2"></i>จัดการนักเรียน
+                            </button>
+                        </div>
+                        <button onClick={openProjector} className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold shadow-lg flex items-center">
+                            <i className="fas fa-external-link-alt mr-2"></i>เปิดจอโปรเจคเตอร์
+                        </button>
+                    </header>
+
+                    {/* Content Area */}
+                    <main className="flex-1 p-6 overflow-auto">
+                        
+                        {/* TAB: CONTROL */}
+                        {activeTab === 'control' && (
+                            <div className="h-full flex flex-col gap-6">
+                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 flex flex-col gap-4 shadow-lg">
+                                    <div className="flex gap-4 items-center">
+                                        <div className="flex flex-col">
+                                            <label className="text-sm text-gray-400 mb-1">ระดับชั้น</label>
+                                            <select value={targetGrade} onChange={(e) => setTargetGrade(e.target.value)} className="bg-slate-700 p-3 rounded-lg border-none focus:ring-2 focus:ring-blue-500 outline-none w-32 font-bold">
+                                                {gradesList.map(g => <option key={g} value={g}>{g}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <label className="text-sm text-gray-400 mb-1">ความยาก</label>
+                                            <select value={targetDiff} onChange={(e) => setTargetDiff(e.target.value)} className="bg-slate-700 p-3 rounded-lg border-none focus:ring-2 focus:ring-blue-500 outline-none w-40 font-bold">
+                                                <option value="ง่าย">ง่าย</option>
+                                                <option value="ปานกลาง">ปานกลาง</option>
+                                                <option value="ยาก">ยาก</option>
+                                                <option value="ยากมาก">ยากมาก</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex items-end pb-1 gap-2">
+                                            <button onClick={handlePreview} className="px-5 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold shadow-lg transition-transform active:scale-95 flex flex-col items-center">
+                                                <span><i className="fas fa-dice mr-2"></i>พรีวิวโจทย์</span>
+                                                <span className="text-[10px] text-blue-200 opacity-80">(Shift)</span>
+                                            </button>
+                                            <button onClick={handleSendToProjector} disabled={!previewQ} className={`px-5 py-3 rounded-lg font-bold shadow-lg transition-all active:scale-95 flex flex-col items-center ${previewQ ? 'bg-green-500 hover:bg-green-400 text-white' : 'bg-slate-700 text-gray-500 cursor-not-allowed'}`}>
+                                                <span><i className="fas fa-paper-plane mr-2"></i>ส่งขึ้นจอ</span>
+                                                <span className="text-[10px] opacity-80">(Enter)</span>
+                                            </button>
+                                            <button onClick={handleTogglePause} className="px-5 py-3 bg-orange-500 hover:bg-orange-400 rounded-lg font-bold shadow-lg transition-transform active:scale-95 flex flex-col items-center">
+                                                <span><i className="fas fa-pause mr-2"></i>หยุด/เดินเวลา</span>
+                                                <span className="text-[10px] text-orange-200 opacity-80">(Space)</span>
+                                            </button>
+                                            <button onClick={handleShowAnswer} className="px-5 py-3 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold shadow-lg transition-transform active:scale-95 flex flex-col items-center">
+                                                <span><i className="fas fa-magic mr-2"></i>เฉลยโจทย์</span>
+                                                <span className="text-[10px] text-purple-200 opacity-80">(ปุ่ม A)</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Preview Box */}
+                                    <div className="bg-slate-900 rounded-xl p-6 flex flex-col items-center justify-center min-h-[140px] border-2 border-dashed border-slate-600 relative shadow-inner">
+                                        {previewQ ? (
+                                            <>
+                                                <div className="absolute top-3 left-3 bg-yellow-500/20 text-yellow-400 text-xs px-3 py-1 rounded-full font-bold border border-yellow-500/50 animate-pulse"><i className="fas fa-eye mr-2"></i>ครูเห็นคนเดียว</div>
+                                                <div className="text-4xl font-bold text-white mb-4 mt-4">{previewQ.question} = <span className="text-green-400">{previewQ.answer}</span></div>
+                                                
+                                                <div className="text-sm text-gray-400 bg-slate-800 px-4 py-2 rounded-lg border border-slate-700 w-full max-w-2xl">
+                                                    <div className="text-yellow-400 mb-1 font-bold text-xs">วิธีทำ:</div>
+                                                    {previewQ.steps.map((step, idx) => (
+                                                        <div key={idx} className="text-gray-300 ml-2">• {step}</div>
+                                                    ))}
+                                                </div>
+                                                
+                                                <div className="mt-4 text-sm text-gray-300 bg-blue-900/40 px-4 py-2 rounded-full border border-blue-500/30">แนะนำให้คะแนน: <span className="text-green-400 font-bold ml-1">+{previewQ.recommendedPoints}</span></div>
+                                            </>
+                                        ) : (
+                                            <div className="text-gray-500 flex flex-col items-center">
+                                                <i className="fas fa-chalkboard text-4xl mb-3 opacity-50"></i>
+                                                <span>กดปุ่ม "พรีวิวโจทย์" เพื่อสร้างโจทย์ก่อนส่งขึ้นจอ</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Student Scoring Grid */}
+                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 flex-1 shadow-lg overflow-auto">
+                                    <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                                        <span><i className="fas fa-star mr-2 text-yellow-400"></i>กระดานให้คะแนน</span>
+                                        <span className="text-sm font-normal text-gray-400">คลิกที่ปุ่มเพื่อบวกคะแนน (โปรเจคเตอร์จะไม่เห็นหน้านี้)</span>
+                                    </h2>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                        {students.map(st => {
+                                            const rank = getRankInfo(st.score);
+                                            return (
+                                                <div key={st.id} className="bg-slate-700 p-4 rounded-xl border border-slate-600 flex flex-col items-center shadow-md">
+                                                    <div className="text-lg font-bold truncate w-full text-center mb-1">{st.name}</div>
+                                                    <div className="text-xs text-gray-400 mb-2">ชั้น {st.grade}</div>
+                                                    <div className={`px-3 py-1 rounded-full text-xs font-bold mb-3 ${rank.color}`}>
+                                                        {rank.name} ({st.score})
+                                                    </div>
+                                                    <div className="flex gap-2 w-full">
+                                                        <button onClick={() => addPoints(st.id, 1)} className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg font-bold shadow-lg">+1</button>
+                                                        <button onClick={() => addPoints(st.id, 3)} className="flex-1 bg-green-600 hover:bg-green-500 py-2 rounded-lg font-bold shadow-lg">+3</button>
+                                                        <button onClick={() => addPoints(st.id, 5)} className="flex-1 bg-purple-600 hover:bg-purple-500 py-2 rounded-lg font-bold shadow-lg">+5</button>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TAB: RANK */}
+                        {activeTab === 'rank' && (
+                            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-2xl font-bold"><i className="fas fa-list-ol mr-2 text-yellow-400"></i>จัดการกระดานอันดับ</h2>
+                                    <div className="flex gap-4">
+                                        <select value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className="bg-slate-700 p-2 rounded-lg outline-none font-bold">
+                                            <option value="ทั้งหมด">ดูทุกระดับชั้น</option>
+                                            {gradesList.map(g => <option key={g} value={g}>เฉพาะ {g}</option>)}
+                                        </select>
+                                        <button onClick={handleResetRanks} className="bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg font-bold shadow-lg">
+                                            <i className="fas fa-trash-alt mr-2"></i>รีเซ็ตคะแนนทุกคน
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-900 border-b border-slate-700">
+                                                <th className="p-4">อันดับ</th>
+                                                <th className="p-4">ชื่อ - นามสกุล</th>
+                                                <th className="p-4">ชั้น</th>
+                                                <th className="p-4 text-center">ตอบทั้งหมด (ข้อ)</th>
+                                                <th className="p-4 text-center">สถิติ (+1 / +3 / +5)</th>
+                                                <th className="p-4">แรงค์ปัจจุบัน</th>
+                                                <th className="p-4 text-right">คะแนนรวม</th>
+                                                <th className="p-4 text-center">จัดการ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredStudents.sort((a,b) => b.score - a.score).map((st, i) => {
+                                                const rank = getRankInfo(st.score);
+                                                return (
+                                                    <tr key={st.id} className="border-b border-slate-700/50 hover:bg-slate-700/30">
+                                                        <td className="p-4 font-bold">{i+1}</td>
+                                                        <td className="p-4 font-bold">{st.name}</td>
+                                                        <td className="p-4 text-gray-400">{st.grade}</td>
+                                                        <td className="p-4 text-center font-bold">{st.stats?.totalQuestions || 0}</td>
+                                                        <td className="p-4 text-center text-sm text-gray-400">
+                                                            <span className="text-blue-400">{st.stats?.plus1 || 0}</span> / 
+                                                            <span className="text-green-400"> {st.stats?.plus3 || 0}</span> / 
+                                                            <span className="text-purple-400"> {st.stats?.plus5 || 0}</span>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${rank.color}`}>{rank.name}</span>
+                                                        </td>
+                                                        <td className="p-4 text-right font-black text-xl text-blue-400">{st.score}</td>
+                                                        <td className="p-4 text-center">
+                                                            <button onClick={() => openDeductModal(st)} className="bg-red-500/20 hover:bg-red-500/40 text-red-400 px-3 py-1 rounded-lg transition-colors text-sm font-bold">
+                                                                <i className="fas fa-minus mr-1"></i> ลบคะแนน
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                )
+                                            })}
+                                            {filteredStudents.length === 0 && (
+                                                <tr><td colSpan="8" className="p-8 text-center text-gray-500">ไม่พบข้อมูลนักเรียน</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TAB: STUDENTS */}
+                        {activeTab === 'students' && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg col-span-1 h-fit">
+                                    <h2 className="text-xl font-bold mb-4">เพิ่มรายชื่อนักเรียน</h2>
+                                    <form onSubmit={handleAddStudent} className="flex flex-col gap-4">
+                                        <input type="text" placeholder="ชื่อ-นามสกุล หรือ ชื่อเล่น" value={newStName} onChange={(e) => setNewStName(e.target.value)} className="bg-slate-700 p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 w-full" required />
+                                        <select value={newStGrade} onChange={(e) => setNewStGrade(e.target.value)} className="bg-slate-700 p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 w-full">
+                                            {gradesList.map(g => <option key={g} value={g}>{g}</option>)}
+                                        </select>
+                                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 p-3 rounded-lg font-bold shadow-lg mt-2">บันทึกรายชื่อ</button>
+                                    </form>
+                                </div>
+
+                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg col-span-1 md:col-span-2">
+                                    <h2 className="text-xl font-bold mb-4">รายชื่อทั้งหมด ({students.length} คน)</h2>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {students.map(st => (
+                                            <div key={st.id} className="bg-slate-700 p-4 rounded-lg flex justify-between items-center border border-slate-600">
+                                                <div>
+                                                    <div className="font-bold">{st.name}</div>
+                                                    <div className="text-xs text-gray-400">ชั้น {st.grade}</div>
+                                                </div>
+                                                <button onClick={() => handleDeleteStudent(st.id)} className="text-red-400 hover:text-red-300 bg-red-400/10 hover:bg-red-400/20 w-10 h-10 rounded-full flex items-center justify-center transition-colors">
+                                                    <i className="fas fa-trash-alt"></i>
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Modal System */}
+                    {modal.isOpen && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+                            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-2xl max-w-sm w-full">
+                                <h2 className="text-xl font-bold mb-4">{modal.title}</h2>
+                                <p className="text-gray-300 mb-6">{modal.msg}</p>
+                                <div className="flex justify-end gap-3">
+                                    <button className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500 transition-colors" onClick={() => setModal({isOpen: false, title:'', msg:'', onConfirm:null})}>ยกเลิก</button>
+                                    <button className="px-4 py-2 bg-red-600 rounded-lg font-bold hover:bg-red-500 transition-colors shadow-lg shadow-red-600/50" onClick={() => { modal.onConfirm(); setModal({isOpen: false, title:'', msg:'', onConfirm:null}); }}>ยืนยัน</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Deduct Points Modal */}
+                    {deductState.isOpen && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+                            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-2xl max-w-sm w-full">
+                                <h2 className="text-xl font-bold mb-4 text-red-400"><i className="fas fa-user-minus mr-2"></i>ลบคะแนน</h2>
+                                <p className="text-gray-300 mb-2">หักคะแนนของ: <strong className="text-white">{deductState.studentName}</strong></p>
+                                <label className="text-sm text-gray-400 mb-1 block">ระบุจำนวนคะแนนที่ต้องการลบ:</label>
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    value={deductState.pointsToDeduct} 
+                                    onChange={(e) => setDeductState({...deductState, pointsToDeduct: parseInt(e.target.value) || 0})}
+                                    className="bg-slate-900 p-3 rounded-lg outline-none focus:ring-2 focus:ring-red-500 border border-slate-600 w-full text-white font-bold text-center mb-6 text-xl"
+                                />
+                                <div className="flex justify-end gap-3">
+                                    <button className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500 transition-colors" onClick={() => setDeductState({isOpen: false, studentId: null, studentName: '', pointsToDeduct: 1})}>ยกเลิก</button>
+                                    <button className="px-4 py-2 bg-red-600 rounded-lg font-bold hover:bg-red-500 transition-colors shadow-lg shadow-red-600/50 flex items-center" onClick={handleDeductConfirm}>
+                                        <i className="fas fa-check mr-2"></i>ยืนยันหักคะแนน
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Toast System */}
+                    {toast.isVisible && (
+                        <div className="fixed bottom-6 right-6 bg-emerald-500 text-white px-6 py-3 rounded-xl shadow-2xl font-bold flex items-center gap-3 z-50 animate-bounce">
+                            <i className="fas fa-check-circle text-xl"></i> {toast.msg}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const isProjector = window.location.search.includes('projector=true');
+            
+            const [students, setStudents] = useState([]);
+            const [syncState, setSyncState] = useState({ view: 'waiting', questionData: null });
+
+            useEffect(() => {
+                const loadedStudents = JSON.parse(localStorage.getItem('mbr_students') || '[]');
+                setStudents(loadedStudents);
+                const loadedSync = JSON.parse(localStorage.getItem('mbr_sync') || '{"view":"waiting","questionData":null}');
+                setSyncState(loadedSync);
+                
+                const handleStorage = (e) => {
+                    if (e.key === 'mbr_students') setStudents(JSON.parse(e.newValue || '[]'));
+                    if (e.key === 'mbr_sync') setSyncState(JSON.parse(e.newValue || '{"view":"waiting","questionData":null}'));
+                };
+                window.addEventListener('storage', handleStorage);
+                return () => window.removeEventListener('storage', handleStorage);
+            }, []);
+
+            const saveStudents = (newStudents) => {
+                setStudents(newStudents);
+                localStorage.setItem('mbr_students', JSON.stringify(newStudents));
+            };
+            const saveSync = (newSync) => {
+                setSyncState(newSync);
+                localStorage.setItem('mbr_sync', JSON.stringify(newSync));
+            };
+
+            if (isProjector) {
+                return <ProjectorView syncState={syncState} students={students} />;
+            }
+            return <TeacherDashboard students={students} saveStudents={saveStudents} syncState={syncState} saveSync={saveSync} />;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
